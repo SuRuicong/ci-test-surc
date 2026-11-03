@@ -1,0 +1,20 @@
+[package]
+name = "agentos-license-checker"
+version = "0.1.0"
+edition = "2021"
+description = "AgentOS License 现场无状态校验程序（Rust 版）：stdio 契约 status/heartbeat，与 tools/license-checker 契约完全兼容"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "agentos-license-checker"
+path = "src/main.rs"
+
+[dependencies]
+license-core = { path = "../license-core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+hkdf = "0.12"
+hmac = "0.12"
+postgres = "0.19"

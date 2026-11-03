@@ -1,0 +1,16 @@
+[package]
+name = "agentos-license-daemon"
+version = "0.1.0"
+edition = "2021"
+description = "AgentOS License 现场宿主机 daemon（Rust 版）：HTTP 页面（指纹采集展示 + 上传激活），与 tools/license-daemon 契约完全兼容"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "agentos-license-daemon"
+path = "src/main.rs"
+
+[dependencies]
+license-core = { path = "../license-core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+tiny_http = "0.12"

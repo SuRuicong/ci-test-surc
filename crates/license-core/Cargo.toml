@@ -1,0 +1,17 @@
+[package]
+name = "license-core"
+version = "0.1.0"
+edition = "2021"
+description = "AgentOS License 共享核心：验签/schema/canonical JSON/指纹采集/绑定匹配（与 tools/license-issuer、tools/license-daemon 的 TS 实现契约兼容）"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+ed25519-dalek = "2"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+regex = "1"
+ryu = "1"
+wait-timeout = "0.2"

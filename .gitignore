@@ -1,0 +1,14 @@
+# Rust 编译产物
+/target
+**/*.rs.bk
+
+# 本地编译出的可执行文件（不入库）
+/bin/*.exe
+
+# KodaX 会话/工具产生的本地状态
+/.agent
+
+# 系统/编辑器杂项
+.DS_Store
+Thumbs.db
+*.swp

@@ -1,0 +1,17 @@
+# AgentOS License 部署侧 Rust 运行时（DESIGN: docs/第二阶段/20-License机制/DESIGN.md）
+# 交付客户现场的两个可执行文件：指纹/激活 daemon + 运行时校验 checker。
+# 与签发端（tools/license-issuer）部署语义独立：两个 bin 均不含任何签发/私钥能力。
+# 契约与 TypeScript 版（tools/license-daemon、tools/license-checker）完全兼容，可无缝替换。
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/license-core",
+    "crates/license-daemon",
+    "crates/license-checker",
+]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
