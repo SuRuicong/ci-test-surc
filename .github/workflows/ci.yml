@@ -9,14 +9,20 @@ on:
 
 jobs:
   build:
-    name: cargo build & test (${{ matrix.os }})
+    name: cargo build & test (${{ matrix.os-name }}-${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          # Linux x86_64（固定 ubuntu-24.04，避免 ubuntu-latest 迁移预告的 notice）
+          - { runs-on: ubuntu-24.04,     os-name: linux,   arch: x86_64 }
+          # Linux ARM64（原生 ARM runner，公开仓库免费）
+          - { runs-on: ubuntu-24.04-arm, os-name: linux,   arch: aarch64 }
+          # Windows x86_64
+          - { runs-on: windows-latest,   os-name: windows, arch: x86_64 }
+    runs-on: ${{ matrix.runs-on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -38,28 +44,29 @@ jobs:
         run: cargo build --workspace --locked --release
 
       - name: 打包产物（Linux tar.gz + sha256）
-        if: runner.os == 'Linux'
+        if: matrix.os-name == 'linux'
         run: |
           mkdir -p dist
-          tar -czf "dist/agentos-license-${{ github.ref_name }}-linux-x86_64.tar.gz" \
+          pkg="agentos-license-${{ github.ref_name }}-linux-${{ matrix.arch }}"
+          tar -czf "dist/${pkg}.tar.gz" \
             -C target/release agentos-license-daemon agentos-license-checker
-          cd dist && sha256sum "agentos-license-${{ github.ref_name }}-linux-x86_64.tar.gz" \
-            > "agentos-license-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256"
+          cd dist && sha256sum "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
 
       - name: 打包产物（Windows zip + sha256）
-        if: runner.os == 'Windows'
+        if: matrix.os-name == 'windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          $zip = "dist/agentos-license-${{ github.ref_name }}-windows-x86_64.zip"
+          $pkg = "agentos-license-${{ github.ref_name }}-windows-${{ matrix.arch }}"
+          $zip = "dist/$pkg.zip"
           Compress-Archive -Path target/release/agentos-license-daemon.exe, target/release/agentos-license-checker.exe -DestinationPath $zip
           $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          "$h  agentos-license-${{ github.ref_name }}-windows-x86_64.zip" | Out-File -Encoding ascii "$zip.sha256"
+          "$h  $pkg.zip" | Out-File -Encoding ascii "$zip.sha256"
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: dist-${{ matrix.os }}
+          name: dist-${{ matrix.os-name }}-${{ matrix.arch }}
           path: dist/
 
   release:
@@ -67,19 +74,19 @@ jobs:
     needs: build
     # 仅 tag 推送时发布；workflow_dispatch 手动触发（ref 是分支）时跳过
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - name: 汇总全部平台产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           merge-multiple: true
           path: release/
 
       - name: 创建 Release 并挂载产物
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release/*
           generate_release_notes: true
