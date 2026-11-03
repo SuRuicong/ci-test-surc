@@ -36,12 +36,20 @@ fn read_arg<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 }
 
 fn load_public_key(file: &str, kid_arg: Option<&str>) -> AgentosResult<PublicKeyMetadata> {
-    let text = std::fs::read_to_string(file)
-        .map_err(|e| AgentosError::new("ERR_USAGE", &format!("cannot read public key file {file}: {e}")))?;
+    let text = std::fs::read_to_string(file).map_err(|e| {
+        AgentosError::new(
+            "ERR_USAGE",
+            &format!("cannot read public key file {file}: {e}"),
+        )
+    })?;
     let text = text.trim();
     if text.starts_with('{') {
-        let meta: serde_json::Value = serde_json::from_str(text)
-            .map_err(|e| AgentosError::new("ERR_USAGE", &format!("invalid public-key metadata JSON: {e}")))?;
+        let meta: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+            AgentosError::new(
+                "ERR_USAGE",
+                &format!("invalid public-key metadata JSON: {e}"),
+            )
+        })?;
         let kid = meta.get("kid").and_then(serde_json::Value::as_str);
         let pem = meta.get("publicKeyPem").and_then(serde_json::Value::as_str);
         match (kid, pem) {
@@ -78,7 +86,11 @@ fn run(argv: &[String]) -> AgentosResult<i32> {
     };
     if command != "status" && command != "heartbeat" {
         std::io::stderr().write_all(USAGE.as_bytes()).ok();
-        return Ok(if command == "--help" || command == "-h" { 0 } else { 1 });
+        return Ok(if command == "--help" || command == "-h" {
+            0
+        } else {
+            1
+        });
     }
     let state_dir = read_arg(rest, "--state-dir");
     let public_key_file = read_arg(rest, "--public-key-file");
@@ -131,7 +143,10 @@ fn run(argv: &[String]) -> AgentosResult<i32> {
             println!("{}", compact_json(payload));
         }
     } else {
-        eprintln!("[license-checker] exit={} {}", result.exit_code, result.diagnostics);
+        eprintln!(
+            "[license-checker] exit={} {}",
+            result.exit_code, result.diagnostics
+        );
     }
     Ok(result.exit_code)
 }

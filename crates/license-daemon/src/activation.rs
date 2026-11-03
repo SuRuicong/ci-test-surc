@@ -76,7 +76,13 @@ fn envelope_value(shape_kid: &str, shape_signature: &str, payload: &LicensePaylo
         ("binding", binding),
         (
             "features",
-            Value::Array(payload.features.iter().map(|f| Value::String(f.clone())).collect()),
+            Value::Array(
+                payload
+                    .features
+                    .iter()
+                    .map(|f| Value::String(f.clone()))
+                    .collect(),
+            ),
         ),
         (
             "renewalOf",
@@ -104,8 +110,16 @@ fn rename_replace(from: &Path, to: &Path) -> io::Result<()> {
         fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
     }
     const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
-    let from_w: Vec<u16> = from.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-    let to_w: Vec<u16> = to.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let from_w: Vec<u16> = from
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let to_w: Vec<u16> = to
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     if unsafe { MoveFileExW(from_w.as_ptr(), to_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) } == 0 {
         Err(io::Error::last_os_error())
     } else {
@@ -118,16 +132,28 @@ fn rename_replace(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 
-fn atomic_write(state_dir: &Path, tmp_name: &str, target_name: &str, content: &str) -> AgentosResult<PathBuf> {
+fn atomic_write(
+    state_dir: &Path,
+    tmp_name: &str,
+    target_name: &str,
+    content: &str,
+) -> AgentosResult<PathBuf> {
     let tmp = state_dir.join(tmp_name);
     let target = state_dir.join(target_name);
     std::fs::write(&tmp, content).map_err(|e| {
-        AgentosError::new("ERR_STATE_WRITE_FAILED", &format!("failed to write {}: {e}", tmp.display()))
+        AgentosError::new(
+            "ERR_STATE_WRITE_FAILED",
+            &format!("failed to write {}: {e}", tmp.display()),
+        )
     })?;
     rename_replace(&tmp, &target).map_err(|e| {
         AgentosError::new(
             "ERR_STATE_WRITE_FAILED",
-            &format!("failed to rename {} -> {}: {e}", tmp.display(), target.display()),
+            &format!(
+                "failed to rename {} -> {}: {e}",
+                tmp.display(),
+                target.display()
+            ),
         )
     })?;
     Ok(target)
@@ -147,7 +173,10 @@ pub fn activate_license(
     if !match_result.ok {
         return Err(AgentosError::new(
             "ERR_FINGERPRINT_MISMATCH",
-            &format!("Machine fingerprint mismatch: {}.", match_result.mismatches.join(", ")),
+            &format!(
+                "Machine fingerprint mismatch: {}.",
+                match_result.mismatches.join(", ")
+            ),
         ));
     }
 

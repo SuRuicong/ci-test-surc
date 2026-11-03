@@ -43,7 +43,10 @@ fn load_public_key(
     if trimmed.starts_with('{') {
         let meta: Value = serde_json::from_str(trimmed)?;
         // TS `!meta.kid || !meta.publicKeyPem`：要求均为非空字符串。
-        let kid = meta.get("kid").and_then(Value::as_str).filter(|s| !s.is_empty());
+        let kid = meta
+            .get("kid")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty());
         let pem = meta
             .get("publicKeyPem")
             .and_then(Value::as_str)
@@ -126,7 +129,11 @@ fn run(argv: &[String]) -> Result<i32, Box<dyn Error + Send + Sync>> {
 
     let fingerprint = collect_fingerprint(&SystemProbeSource::new(), instance_id);
     let anchor_available = fingerprint.anchor_available;
-    let anchor = if anchor_available { "ok" } else { "MISSING(c1)" };
+    let anchor = if anchor_available {
+        "ok"
+    } else {
+        "MISSING(c1)"
+    };
 
     let bind_log = bind.clone();
     let state_dir_log = state_dir.clone();

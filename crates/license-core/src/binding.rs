@@ -14,7 +14,10 @@ pub struct BindingMatchResult {
     pub mismatches: Vec<String>,
 }
 
-pub fn match_binding(binding: &LicenseBinding, current_components: &HashMap<String, String>) -> BindingMatchResult {
+pub fn match_binding(
+    binding: &LicenseBinding,
+    current_components: &HashMap<String, String>,
+) -> BindingMatchResult {
     // 运行侧采集用内部名；归一化到代号空间后与 binding（代号或旧名均可）比较。
     let current: HashMap<String, String> = current_components
         .iter()
@@ -28,7 +31,10 @@ pub fn match_binding(binding: &LicenseBinding, current_components: &HashMap<Stri
         }
     }
     if !mismatches.is_empty() {
-        return BindingMatchResult { ok: false, mismatches };
+        return BindingMatchResult {
+            ok: false,
+            mismatches,
+        };
     }
     let mut optional_mismatches = 0i64;
     for comp in &binding.optional {
@@ -68,7 +74,10 @@ mod tests {
     fn legacy_binding() -> LicenseBinding {
         LicenseBinding {
             mode: "machine".to_string(),
-            required: vec![("machine-id".to_string(), "sha256:".to_string() + &"a".repeat(64))],
+            required: vec![(
+                "machine-id".to_string(),
+                "sha256:".to_string() + &"a".repeat(64),
+            )],
             optional: vec![OptionalBindingComponent {
                 name: "dmi-product-uuid".to_string(),
                 sha256: "sha256:".to_string() + &"b".repeat(64),
@@ -79,7 +88,10 @@ mod tests {
 
     /// 运行侧采集的分量恒为内部名（fingerprint.rs 采集不变）。
     fn current(entries: &[(&str, &str)]) -> HashMap<String, String> {
-        entries.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     fn full_current() -> HashMap<String, String> {

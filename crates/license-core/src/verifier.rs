@@ -31,7 +31,10 @@ pub fn verify_license_object(
     let shape = match parse_license_envelope_shape(value) {
         Ok(s) => s,
         Err(_errors) => {
-            return Err(AgentosError::new("ERR_INVALID_LICENSE", "License envelope is invalid."));
+            return Err(AgentosError::new(
+                "ERR_INVALID_LICENSE",
+                "License envelope is invalid.",
+            ));
         }
     };
 
@@ -42,7 +45,12 @@ pub fn verify_license_object(
         ));
     }
 
-    assert_signature_valid(&shape.kid, &shape.payload, &shape.signature, &public_key.public_key_pem)?;
+    assert_signature_valid(
+        &shape.kid,
+        &shape.payload,
+        &shape.signature,
+        &public_key.public_key_pem,
+    )?;
     let payload = require_payload(&shape.payload)?;
 
     let mut expired = false;
@@ -55,7 +63,10 @@ pub fn verify_license_object(
         }
         expired = is_expired(&payload.expires_at, now_ms);
         if expired {
-            return Err(AgentosError::new("ERR_LICENSE_EXPIRED", "License is expired."));
+            return Err(AgentosError::new(
+                "ERR_LICENSE_EXPIRED",
+                "License is expired.",
+            ));
         }
     }
 
@@ -142,7 +153,10 @@ mod tests {
         let verified = verify_license_object(&envelope, &key, now_ms, false).unwrap();
         // 解析输出保留输入原名（归一化只在比对边界）。
         assert_eq!(verified.payload.binding.required[0].0, "machine-id");
-        assert_eq!(verified.payload.binding.optional[0].name, "dmi-product-uuid");
+        assert_eq!(
+            verified.payload.binding.optional[0].name,
+            "dmi-product-uuid"
+        );
     }
 
     #[test]

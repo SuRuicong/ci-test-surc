@@ -57,7 +57,10 @@ pub fn parse_linux_cpu_info(raw: &str) -> Option<String> {
             cores += 1;
         }
         if model.is_none() {
-            if let Some(caps) = Regex::new(r"^model name\s*:\s*(.+)$").unwrap().captures(line) {
+            if let Some(caps) = Regex::new(r"^model name\s*:\s*(.+)$")
+                .unwrap()
+                .captures(line)
+            {
                 model = Some(caps.get(1).unwrap().as_str().trim().to_string());
             }
         }
@@ -92,25 +95,34 @@ fn probe_linux(source: &dyn ProbeSource) -> Vec<(String, String)> {
     vec![
         (
             REQUIRED_ANCHOR_NAME.to_string(),
-            hashed_component(source.read_file("/etc/machine-id").as_deref(), |s| Some(norm(s))),
+            hashed_component(source.read_file("/etc/machine-id").as_deref(), |s| {
+                Some(norm(s))
+            }),
         ),
         (
             "dmi-product-uuid".to_string(),
             hashed_component(
-                source.read_file("/sys/class/dmi/id/product_uuid").as_deref(),
+                source
+                    .read_file("/sys/class/dmi/id/product_uuid")
+                    .as_deref(),
                 |s| Some(norm(s)),
             ),
         ),
         (
             "dmi-product-serial".to_string(),
             hashed_component(
-                source.read_file("/sys/class/dmi/id/product_serial").as_deref(),
+                source
+                    .read_file("/sys/class/dmi/id/product_serial")
+                    .as_deref(),
                 |s| Some(norm(s)),
             ),
         ),
         (
             "cpu".to_string(),
-            hashed_component(source.read_file("/proc/cpuinfo").as_deref(), parse_linux_cpu_info),
+            hashed_component(
+                source.read_file("/proc/cpuinfo").as_deref(),
+                parse_linux_cpu_info,
+            ),
         ),
     ]
 }
@@ -118,17 +130,30 @@ fn probe_linux(source: &dyn ProbeSource) -> Vec<(String, String)> {
 fn probe_windows(source: &dyn ProbeSource) -> Vec<(String, String)> {
     let reg_out = source.exec(
         "reg",
-        &["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"],
+        &[
+            "query",
+            "HKLM\\SOFTWARE\\Microsoft\\Cryptography",
+            "/v",
+            "MachineGuid",
+        ],
     );
     let guid = reg_out.as_deref().and_then(parse_machine_guid_reg_output);
 
     let uuid = source.exec(
         "powershell",
-        &["-NoProfile", "-Command", "(Get-CimInstance Win32_ComputerSystemProduct).UUID"],
+        &[
+            "-NoProfile",
+            "-Command",
+            "(Get-CimInstance Win32_ComputerSystemProduct).UUID",
+        ],
     );
     let serial = source.exec(
         "powershell",
-        &["-NoProfile", "-Command", "(Get-CimInstance Win32_BIOS).SerialNumber"],
+        &[
+            "-NoProfile",
+            "-Command",
+            "(Get-CimInstance Win32_BIOS).SerialNumber",
+        ],
     );
     let cpu = source.exec(
         "powershell",
@@ -170,7 +195,10 @@ fn probe_windows(source: &dyn ProbeSource) -> Vec<(String, String)> {
 }
 
 /// 采集机器指纹：固定序拼接 canonical 文本后取 SHA-256。
-pub fn collect_fingerprint(source: &dyn ProbeSource, instance_id: Option<&str>) -> CollectedFingerprint {
+pub fn collect_fingerprint(
+    source: &dyn ProbeSource,
+    instance_id: Option<&str>,
+) -> CollectedFingerprint {
     let mut components = if source.platform() == "win32" {
         probe_windows(source)
     } else {
@@ -356,7 +384,10 @@ mod tests {
         FakeSource {
             platform: "linux",
             files: HashMap::from([
-                ("/etc/machine-id".to_string(), LINUX_MACHINE_ID_RAW.to_string()),
+                (
+                    "/etc/machine-id".to_string(),
+                    LINUX_MACHINE_ID_RAW.to_string(),
+                ),
                 (
                     "/sys/class/dmi/id/product_uuid".to_string(),
                     LINUX_UUID_RAW.to_string(),
@@ -482,7 +513,10 @@ mod tests {
     fn fingerprint_file_schema_and_no_raw_values() {
         let fp = collect_fingerprint(&full_linux_source(), None);
         let file = build_fingerprint_file(&fp);
-        assert_eq!(file["schema"], Value::String(FINGERPRINT_SCHEMA.to_string()));
+        assert_eq!(
+            file["schema"],
+            Value::String(FINGERPRINT_SCHEMA.to_string())
+        );
         assert_eq!(file["fingerprint"], Value::String(fp.fingerprint.clone()));
         let serialized = crate::jsonfmt::canonical_json(&file);
         assert!(!serialized.contains(LINUX_MACHINE_ID_RAW.trim()));
@@ -499,12 +533,21 @@ mod tests {
         let keys: Vec<&str> = components.keys().map(String::as_str).collect();
         assert_eq!(keys, vec!["c1", "c2", "c3", "c4", "c5"]);
         // 值与内部名槽位一一对应（c1 对应 machine-id 槽位的值）。
-        assert_eq!(components["c1"], Value::String(fp.component("machine-id").unwrap().to_string()));
-        assert_eq!(components["c4"], Value::String(fp.component("cpu").unwrap().to_string()));
+        assert_eq!(
+            components["c1"],
+            Value::String(fp.component("machine-id").unwrap().to_string())
+        );
+        assert_eq!(
+            components["c4"],
+            Value::String(fp.component("cpu").unwrap().to_string())
+        );
         // wire 产物不再出现旧名。
         let serialized = crate::jsonfmt::compact_json(&file);
         for legacy in COMPONENT_ORDER {
-            assert!(!serialized.contains(legacy), "fingerprint file leaks {legacy}");
+            assert!(
+                !serialized.contains(legacy),
+                "fingerprint file leaks {legacy}"
+            );
         }
         // 整机指纹值不受代号化影响。
         assert_eq!(file["fingerprint"], Value::String(fp.fingerprint.clone()));

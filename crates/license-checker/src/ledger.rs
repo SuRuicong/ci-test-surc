@@ -11,7 +11,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-pub const GENESIS_HASH: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+pub const GENESIS_HASH: &str =
+    "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const LEDGER_FILE: &str = "ledger.jsonl";
 const TIP_FILE: &str = "ledger-tip.json";
 const LOCK_FILE: &str = "ledger.lock";
@@ -39,9 +40,13 @@ pub struct LedgerEntry {
 
 /// 账本 HMAC 密钥 = HKDF(license 签名, salt = 机器指纹)（DESIGN §2.3/§5.1）。
 pub fn derive_ledger_key(license_signature: &str, machine_fingerprint: &str) -> [u8; 32] {
-    let hk = Hkdf::<Sha256>::new(Some(machine_fingerprint.as_bytes()), license_signature.as_bytes());
+    let hk = Hkdf::<Sha256>::new(
+        Some(machine_fingerprint.as_bytes()),
+        license_signature.as_bytes(),
+    );
     let mut okm = [0u8; 32];
-    hk.expand(HKDF_INFO, &mut okm).expect("32-byte HKDF output is valid");
+    hk.expand(HKDF_INFO, &mut okm)
+        .expect("32-byte HKDF output is valid");
     okm
 }
 
@@ -101,7 +106,10 @@ fn tip_value(t: &LedgerTip) -> Value {
 }
 
 fn compute_entry_hash(e: &LedgerEntry) -> String {
-    format!("sha256:{}", sha256_hex(&canonical_json(&entry_base_value(e))))
+    format!(
+        "sha256:{}",
+        sha256_hex(&canonical_json(&entry_base_value(e)))
+    )
 }
 
 fn compute_entry_hmac(key: &[u8; 32], entry_hash: &str) -> String {
@@ -127,8 +135,10 @@ pub fn load_ledger_tip(dir: &Path) -> Result<Option<LedgerTip>, String> {
     if !p.exists() {
         return Ok(None);
     }
-    let text = std::fs::read_to_string(&p).map_err(|e| format!("failed to read {}: {e}", p.display()))?;
-    let v: Value = serde_json::from_str(&text).map_err(|e| format!("invalid JSON in {}: {e}", p.display()))?;
+    let text =
+        std::fs::read_to_string(&p).map_err(|e| format!("failed to read {}: {e}", p.display()))?;
+    let v: Value =
+        serde_json::from_str(&text).map_err(|e| format!("invalid JSON in {}: {e}", p.display()))?;
     match tip_from_value(&v) {
         Some(t) => Ok(Some(t)),
         None => Err(format!("malformed tip in {}", p.display())),
@@ -162,7 +172,11 @@ fn with_lock<T>(dir: &Path, f: impl FnOnce() -> Result<T, String>) -> Result<T, 
     let lock_path = dir.join(LOCK_FILE);
     let deadline = Instant::now() + Duration::from_millis(10000);
     let file = loop {
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock_path) {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
             Ok(fh) => break fh,
             Err(_) => {
                 if Instant::now() > deadline {
@@ -186,8 +200,16 @@ fn rename_replace(from: &Path, to: &Path) -> std::io::Result<()> {
         fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
     }
     const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
-    let from_w: Vec<u16> = from.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-    let to_w: Vec<u16> = to.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let from_w: Vec<u16> = from
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let to_w: Vec<u16> = to
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     if unsafe { MoveFileExW(from_w.as_ptr(), to_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) } == 0 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -223,7 +245,11 @@ pub fn append_ledger_entry(
             .as_ref()
             .map(|t| t.entry_hash.clone())
             .unwrap_or_else(|| GENESIS_HASH.to_string());
-        let cumulative = prev_tip.as_ref().map(|t| t.cumulative_seconds).unwrap_or(0.0) + tick_monotonic_ms / 1000.0;
+        let cumulative = prev_tip
+            .as_ref()
+            .map(|t| t.cumulative_seconds)
+            .unwrap_or(0.0)
+            + tick_monotonic_ms / 1000.0;
         let wall_clock_max = match watermark {
             Some(w) if w > now_iso => w.to_string(),
             _ => now_iso.to_string(),
@@ -273,7 +299,10 @@ pub fn verify_ledger_chain(dir: &Path, key: &[u8; 32]) -> Result<ChainVerifyResu
     let tip = load_ledger_tip(dir)?;
     if !file.exists() {
         return Ok(if tip.is_none() {
-            ChainVerifyResult { ok: true, reason: None }
+            ChainVerifyResult {
+                ok: true,
+                reason: None,
+            }
         } else {
             ChainVerifyResult {
                 ok: false,
@@ -281,8 +310,12 @@ pub fn verify_ledger_chain(dir: &Path, key: &[u8; 32]) -> Result<ChainVerifyResu
             }
         });
     }
-    let content = std::fs::read_to_string(&file).map_err(|e| format!("failed to read ledger: {e}"))?;
-    let lines: Vec<&str> = content.split('\n').filter(|l| !l.trim().is_empty()).collect();
+    let content =
+        std::fs::read_to_string(&file).map_err(|e| format!("failed to read ledger: {e}"))?;
+    let lines: Vec<&str> = content
+        .split('\n')
+        .filter(|l| !l.trim().is_empty())
+        .collect();
     let mut prev_hash = GENESIS_HASH.to_string();
     let mut last: Option<LedgerEntry> = None;
     for (idx, line) in lines.iter().enumerate() {
@@ -333,7 +366,10 @@ pub fn verify_ledger_chain(dir: &Path, key: &[u8; 32]) -> Result<ChainVerifyResu
         last = Some(entry);
     }
     match (&tip, &last) {
-        (None, None) => Ok(ChainVerifyResult { ok: true, reason: None }),
+        (None, None) => Ok(ChainVerifyResult {
+            ok: true,
+            reason: None,
+        }),
         (None, Some(_)) => Ok(ChainVerifyResult {
             ok: false,
             reason: Some("tip missing but ledger has entries".to_string()),
@@ -353,7 +389,10 @@ pub fn verify_ledger_chain(dir: &Path, key: &[u8; 32]) -> Result<ChainVerifyResu
                     reason: Some("tip does not match ledger tail".to_string()),
                 })
             } else {
-                Ok(ChainVerifyResult { ok: true, reason: None })
+                Ok(ChainVerifyResult {
+                    ok: true,
+                    reason: None,
+                })
             }
         }
     }
@@ -364,7 +403,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("agentos-ledger-rs-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("agentos-ledger-rs-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -384,11 +424,18 @@ mod tests {
     fn append_and_verify_roundtrip() {
         let dir = temp_dir("roundtrip");
         let key = derive_ledger_key("sig", "fp");
-        let (_e1, t1) = append_ledger_entry(&dir, &key, 60000.0, "2026-11-15T00:00:00.000Z", None).unwrap();
+        let (_e1, t1) =
+            append_ledger_entry(&dir, &key, 60000.0, "2026-11-15T00:00:00.000Z", None).unwrap();
         assert_eq!(t1.seq, 1);
         assert_eq!(t1.cumulative_seconds, 60.0);
-        let (_e2, t2) =
-            append_ledger_entry(&dir, &key, 1500.0, "2026-11-15T00:01:00.000Z", Some(&t1.wall_clock_max)).unwrap();
+        let (_e2, t2) = append_ledger_entry(
+            &dir,
+            &key,
+            1500.0,
+            "2026-11-15T00:01:00.000Z",
+            Some(&t1.wall_clock_max),
+        )
+        .unwrap();
         assert_eq!(t2.seq, 2);
         assert_eq!(t2.cumulative_seconds, 61.5);
         assert!(verify_ledger_chain(&dir, &key).unwrap().ok);

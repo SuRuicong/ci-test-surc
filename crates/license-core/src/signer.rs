@@ -41,14 +41,23 @@ fn decode_signature_base64url(sig: &str) -> Option<Vec<u8>> {
 }
 
 /// assertSignatureValid：任何解析/验签失败都归一为 ERR_SIGNATURE_VERIFY_FAILED（同 TS 的 try/catch）。
-pub fn assert_signature_valid(kid: &str, payload: &Value, signature_b64url: &str, public_key_pem: &str) -> AgentosResult<()> {
+pub fn assert_signature_valid(
+    kid: &str,
+    payload: &Value,
+    signature_b64url: &str,
+    public_key_pem: &str,
+) -> AgentosResult<()> {
     let ok = (|| -> Option<bool> {
         let key_bytes = ed25519_pubkey_from_pem(public_key_pem)?;
         let verifying_key = VerifyingKey::from_bytes(&key_bytes).ok()?;
         let sig_bytes = decode_signature_base64url(signature_b64url)?;
         let signature = Signature::from_slice(&sig_bytes).ok()?;
         let input = signing_input(kid, payload);
-        Some(verifying_key.verify_strict(input.as_bytes(), &signature).is_ok())
+        Some(
+            verifying_key
+                .verify_strict(input.as_bytes(), &signature)
+                .is_ok(),
+        )
     })()
     .unwrap_or(false);
     if !ok {

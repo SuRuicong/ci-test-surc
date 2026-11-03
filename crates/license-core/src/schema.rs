@@ -76,7 +76,12 @@ pub struct EnvelopeShape {
     pub signature: String,
 }
 
-fn strict_keys(map: &serde_json::Map<String, Value>, allowed: &[&str], path: &str, errors: &mut Vec<String>) {
+fn strict_keys(
+    map: &serde_json::Map<String, Value>,
+    allowed: &[&str],
+    path: &str,
+    errors: &mut Vec<String>,
+) {
     for key in map.keys() {
         if !allowed.contains(&key.as_str()) {
             errors.push(format!("{path}.{key} is not allowed"));
@@ -84,9 +89,17 @@ fn strict_keys(map: &serde_json::Map<String, Value>, allowed: &[&str], path: &st
     }
 }
 
-fn string_field(value: Option<&Value>, path: &str, errors: &mut Vec<String>, min: usize, max: usize) -> Option<String> {
+fn string_field(
+    value: Option<&Value>,
+    path: &str,
+    errors: &mut Vec<String>,
+    min: usize,
+    max: usize,
+) -> Option<String> {
     match value {
-        Some(Value::String(s)) if s.chars().count() >= min && s.chars().count() <= max => Some(s.clone()),
+        Some(Value::String(s)) if s.chars().count() >= min && s.chars().count() <= max => {
+            Some(s.clone())
+        }
         // JS length 按 UTF-16 码元计；中文等 BMP 字符与 chars() 一致，足够契约等价。
         _ => {
             errors.push(format!("{path} must be a string of length {min}..{max}"));
@@ -95,11 +108,19 @@ fn string_field(value: Option<&Value>, path: &str, errors: &mut Vec<String>, min
     }
 }
 
-fn literal_field(value: Option<&Value>, literal: &str, path: &str, errors: &mut Vec<String>) -> Option<String> {
+fn literal_field(
+    value: Option<&Value>,
+    literal: &str,
+    path: &str,
+    errors: &mut Vec<String>,
+) -> Option<String> {
     match value {
         Some(Value::String(s)) if s == literal => Some(s.clone()),
         _ => {
-            errors.push(format!("{path} must be {}", serde_json::to_string(literal).unwrap()));
+            errors.push(format!(
+                "{path} must be {}",
+                serde_json::to_string(literal).unwrap()
+            ));
             None
         }
     }
@@ -107,15 +128,23 @@ fn literal_field(value: Option<&Value>, literal: &str, path: &str, errors: &mut 
 
 fn iso_field(value: Option<&Value>, path: &str, errors: &mut Vec<String>) -> Option<String> {
     match value {
-        Some(Value::String(s)) if iso_re().is_match(s) && parse_iso_millis(s).is_some() => Some(s.clone()),
+        Some(Value::String(s)) if iso_re().is_match(s) && parse_iso_millis(s).is_some() => {
+            Some(s.clone())
+        }
         _ => {
-            errors.push(format!("{path} must be an ISO-8601 timestamp with seconds and timezone"));
+            errors.push(format!(
+                "{path} must be an ISO-8601 timestamp with seconds and timezone"
+            ));
             None
         }
     }
 }
 
-fn sha256_component_field(value: Option<&Value>, path: &str, errors: &mut Vec<String>) -> Option<String> {
+fn sha256_component_field(
+    value: Option<&Value>,
+    path: &str,
+    errors: &mut Vec<String>,
+) -> Option<String> {
     match value {
         Some(Value::String(s))
             if s.starts_with("sha256:") && sha256_hex_re().is_match(&s["sha256:".len()..]) =>
@@ -155,10 +184,21 @@ pub fn parse_license_envelope_shape(value: &Value) -> Result<EnvelopeShape, Vec<
         _ => return Err(vec!["license envelope must be an object".to_string()]),
     };
     strict_keys(map, &ENVELOPE_KEYS, "license", &mut errors);
-    let schema = literal_field(map.get("schema"), LICENSE_SCHEMA, "license.schema", &mut errors);
+    let schema = literal_field(
+        map.get("schema"),
+        LICENSE_SCHEMA,
+        "license.schema",
+        &mut errors,
+    );
     let kid = string_field(map.get("kid"), "license.kid", &mut errors, 1, 128);
     let alg = literal_field(map.get("alg"), LICENSE_ALG, "license.alg", &mut errors);
-    let signature = string_field(map.get("signature"), "license.signature", &mut errors, 16, 4096);
+    let signature = string_field(
+        map.get("signature"),
+        "license.signature",
+        &mut errors,
+        16,
+        4096,
+    );
     if let Some(sig) = &signature {
         if !base64url_re().is_match(sig) {
             errors.push("license.signature must be base64url".to_string());
@@ -167,7 +207,12 @@ pub fn parse_license_envelope_shape(value: &Value) -> Result<EnvelopeShape, Vec<
     if !map.contains_key("payload") {
         errors.push("license.payload is required".to_string());
     }
-    if !errors.is_empty() || schema.is_none() || kid.is_none() || alg.is_none() || signature.is_none() {
+    if !errors.is_empty()
+        || schema.is_none()
+        || kid.is_none()
+        || alg.is_none()
+        || signature.is_none()
+    {
         return Err(errors);
     }
     Ok(EnvelopeShape {
@@ -200,7 +245,9 @@ fn parse_binding(value: Option<&Value>, errors: &mut Vec<String>) -> Option<Lice
             let mut required_codenames: Vec<&str> = Vec::new();
             for (name, hash_value) in req {
                 if !is_known_component_name(name) {
-                    errors.push(format!("payload.binding.required.{name} is not a known fingerprint component"));
+                    errors.push(format!(
+                        "payload.binding.required.{name} is not a known fingerprint component"
+                    ));
                     continue;
                 }
                 let codename = to_codename(name);
@@ -229,7 +276,9 @@ fn parse_binding(value: Option<&Value>, errors: &mut Vec<String>) -> Option<Lice
     match map.get("optional") {
         Some(Value::Array(arr)) => {
             if arr.len() > 16 {
-                errors.push("payload.binding.optional must contain at most 16 components".to_string());
+                errors.push(
+                    "payload.binding.optional must contain at most 16 components".to_string(),
+                );
             }
             for (index, item) in arr.iter().enumerate() {
                 let item_path = format!("payload.binding.optional[{index}]");
@@ -241,11 +290,14 @@ fn parse_binding(value: Option<&Value>, errors: &mut Vec<String>) -> Option<Lice
                     }
                 };
                 strict_keys(obj, &OPTIONAL_COMPONENT_KEYS, &item_path, errors);
-                let name = string_field(obj.get("name"), &format!("{item_path}.name"), errors, 1, 64);
+                let name =
+                    string_field(obj.get("name"), &format!("{item_path}.name"), errors, 1, 64);
                 if let Some(n) = &name {
                     // 与 TS schema.ts 一致：optional 不接受必选锚点（锚点归一化后代号即 c1）。
                     if !is_known_component_name(n) || to_codename(n) == ANCHOR_CODENAME {
-                        errors.push(format!("{item_path}.name is not a known fingerprint component"));
+                        errors.push(format!(
+                            "{item_path}.name is not a known fingerprint component"
+                        ));
                     } else {
                         let codename = to_codename(n);
                         if optional_codenames.iter().any(|c| c == codename) {
@@ -257,7 +309,11 @@ fn parse_binding(value: Option<&Value>, errors: &mut Vec<String>) -> Option<Lice
                         }
                     }
                 }
-                let sha256 = sha256_component_field(obj.get("sha256"), &format!("{item_path}.sha256"), errors);
+                let sha256 = sha256_component_field(
+                    obj.get("sha256"),
+                    &format!("{item_path}.sha256"),
+                    errors,
+                );
                 if let (Some(n), Some(s)) = (name, sha256) {
                     optional.push(OptionalBindingComponent { name: n, sha256: s });
                 }
@@ -271,7 +327,9 @@ fn parse_binding(value: Option<&Value>, errors: &mut Vec<String>) -> Option<Lice
             let as_int = n.as_i64().or_else(|| n.as_u64().map(|u| u as i64));
             match as_int {
                 Some(v) if (0..=16).contains(&v) => tolerance = v,
-                _ => errors.push("payload.binding.tolerance must be an integer in 0..16".to_string()),
+                _ => {
+                    errors.push("payload.binding.tolerance must be an integer in 0..16".to_string())
+                }
             }
         }
         _ => errors.push("payload.binding.tolerance must be an integer in 0..16".to_string()),
@@ -291,7 +349,10 @@ fn parse_binding(value: Option<&Value>, errors: &mut Vec<String>) -> Option<Lice
 pub fn require_payload(value: &Value) -> AgentosResult<LicensePayload> {
     match parse_payload(value) {
         Ok(p) => Ok(p),
-        Err(_errors) => Err(AgentosError::new("ERR_INVALID_PAYLOAD", "License payload is invalid.")),
+        Err(_errors) => Err(AgentosError::new(
+            "ERR_INVALID_PAYLOAD",
+            "License payload is invalid.",
+        )),
     }
 }
 
@@ -303,13 +364,22 @@ fn parse_payload(value: &Value) -> Result<LicensePayload, Vec<String>> {
     };
     strict_keys(map, &PAYLOAD_KEYS, "payload", &mut errors);
     let product = literal_field(map.get("product"), PRODUCT, "payload.product", &mut errors);
-    let license_id = string_field(map.get("licenseId"), "payload.licenseId", &mut errors, 1, 128);
+    let license_id = string_field(
+        map.get("licenseId"),
+        "payload.licenseId",
+        &mut errors,
+        1,
+        128,
+    );
     let customer = string_field(map.get("customer"), "payload.customer", &mut errors, 1, 256);
     let edition = string_field(map.get("edition"), "payload.edition", &mut errors, 1, 64);
     let license_kind = match map.get("licenseKind") {
         Some(Value::String(s)) if LICENSE_KINDS.contains(&s.as_str()) => Some(s.clone()),
         _ => {
-            errors.push(format!("payload.licenseKind must be one of {}", LICENSE_KINDS.join("|")));
+            errors.push(format!(
+                "payload.licenseKind must be one of {}",
+                LICENSE_KINDS.join("|")
+            ));
             None
         }
     };
@@ -338,7 +408,8 @@ fn parse_payload(value: &Value) -> Result<LicensePayload, Vec<String>> {
             }
         }
         _ => errors.push(
-            "payload.maxRuntimeSeconds must be a positive integer no greater than 315576000".to_string(),
+            "payload.maxRuntimeSeconds must be a positive integer no greater than 315576000"
+                .to_string(),
         ),
     }
     let binding = parse_binding(map.get("binding"), &mut errors);
@@ -518,9 +589,9 @@ mod tests {
             "bios-uuid": format!("sha256:{}", "d".repeat(64))
         });
         let err = parse_payload(&p).unwrap_err();
-        assert!(err
-            .iter()
-            .any(|e| e == "payload.binding.required.bios-uuid is not a known fingerprint component"));
+        assert!(err.iter().any(
+            |e| e == "payload.binding.required.bios-uuid is not a known fingerprint component"
+        ));
     }
 
     #[test]
@@ -533,7 +604,8 @@ mod tests {
             let err = parse_payload(&p).unwrap_err();
             assert!(err
                 .iter()
-                .any(|e| e == "payload.binding.optional[0].name is not a known fingerprint component"));
+                .any(|e| e
+                    == "payload.binding.optional[0].name is not a known fingerprint component"));
         }
     }
 }

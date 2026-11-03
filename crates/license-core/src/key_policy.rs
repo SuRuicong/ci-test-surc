@@ -50,8 +50,17 @@ mod tests {
 
     #[test]
     fn kid_policy() {
-        assert!(public_key_metadata("agentos-dev-2026-q4", "pem").unwrap().production == false);
-        assert!(public_key_metadata("agentos-prod-2026-q4", "pem").unwrap().production);
+        assert!(
+            public_key_metadata("agentos-dev-2026-q4", "pem")
+                .unwrap()
+                .production
+                == false
+        );
+        assert!(
+            public_key_metadata("agentos-prod-2026-q4", "pem")
+                .unwrap()
+                .production
+        );
         assert!(public_key_metadata("bad-kid", "pem").is_err());
     }
 }

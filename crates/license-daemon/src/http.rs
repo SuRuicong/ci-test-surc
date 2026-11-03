@@ -134,9 +134,17 @@ fn respond(request: Request, status: u16, content_type: &str, body: String) {
 }
 
 /// 与 respond 相同，但允许附加响应头（用于 /fingerprint.json 的 Content-Disposition 附件下载）。
-fn respond_with_headers(request: Request, status: u16, content_type: &str, extra: Vec<Header>, body: String) {
-    let mut headers = vec![Header::from_bytes(&b"content-type"[..], content_type.as_bytes())
-        .expect("content-type header")];
+fn respond_with_headers(
+    request: Request,
+    status: u16,
+    content_type: &str,
+    extra: Vec<Header>,
+    body: String,
+) {
+    let mut headers = vec![
+        Header::from_bytes(&b"content-type"[..], content_type.as_bytes())
+            .expect("content-type header"),
+    ];
     headers.extend(extra);
     let bytes = body.into_bytes();
     let len = bytes.len();
@@ -199,7 +207,11 @@ fn handle_request(request: Request, ctx: &DaemonContext) {
 /// body 超限与 JSON.parse 失败在 TS 中走同一个 catch → 同一个 400；不校验请求 Content-Type。
 fn handle_activate(mut request: Request, ctx: &DaemonContext) {
     let mut buf: Vec<u8> = Vec::new();
-    let parsed = match request.as_reader().take(BODY_LIMIT + 1).read_to_end(&mut buf) {
+    let parsed = match request
+        .as_reader()
+        .take(BODY_LIMIT + 1)
+        .read_to_end(&mut buf)
+    {
         // Buffer.toString('utf8') 是 lossy 解码 → from_utf8_lossy。
         Ok(_) if buf.len() as u64 <= BODY_LIMIT => {
             serde_json::from_str::<Value>(&String::from_utf8_lossy(&buf)).ok()
@@ -213,7 +225,10 @@ fn handle_activate(mut request: Request, ctx: &DaemonContext) {
                 request,
                 400,
                 JSON_CT,
-                error_body("ERR_INVALID_LICENSE", "Request body is not valid JSON license."),
+                error_body(
+                    "ERR_INVALID_LICENSE",
+                    "Request body is not valid JSON license.",
+                ),
             );
             return;
         }
@@ -299,13 +314,20 @@ mod tests {
         assert!(page.contains("<h2>激活</h2>"));
         assert!(page.contains("<hr/>"));
         assert!(page.contains("<input type=\"file\" id=\"licFile\""));
-        assert!(page.contains("下载 <a href=\"/fingerprint.json\">fingerprint.json</a> 文件发给供应商签发"));
+        assert!(page.contains(
+            "下载 <a href=\"/fingerprint.json\">fingerprint.json</a> 文件发给供应商签发"
+        ));
         assert!(!page.contains("<textarea"));
         assert!(!page.contains("getElementById('lic')"));
         // 方案 C：页面不再有分量表，不出现任何分量名与机器标识来源字样。
         assert!(!page.contains("<table"));
         assert!(!page.contains("${rows}"));
-        for forbidden in ["machine-id", "dmi-product", "/etc/machine-id", "MachineGuid"] {
+        for forbidden in [
+            "machine-id",
+            "dmi-product",
+            "/etc/machine-id",
+            "MachineGuid",
+        ] {
             assert!(!page.contains(forbidden), "page leaks {forbidden}");
         }
     }
@@ -319,7 +341,13 @@ mod tests {
             "<strong>无法采集必选锚点（c1）。</strong><br/>\n      缺失该锚点无法签发 license，本页面不做降级放行。请联系供应商支持，并提供上方完整指纹与锚点代号 c1。"
         ));
         // 页面不点名机器标识来源。
-        for forbidden in ["machine-id", "dmi-product", "/etc/machine-id", "MachineGuid", "<table"] {
+        for forbidden in [
+            "machine-id",
+            "dmi-product",
+            "/etc/machine-id",
+            "MachineGuid",
+            "<table",
+        ] {
             assert!(!page.contains(forbidden), "page leaks {forbidden}");
         }
     }
@@ -333,7 +361,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(h.field.as_str(), "content-disposition");
-        assert_eq!(h.value.as_str(), "attachment; filename=\"fingerprint.json\"");
+        assert_eq!(
+            h.value.as_str(),
+            "attachment; filename=\"fingerprint.json\""
+        );
     }
 
     #[test]
@@ -368,6 +399,9 @@ mod tests {
             error_body("ERR_X", "boom"),
             "{\"ok\":false,\"code\":\"ERR_X\",\"message\":\"boom\"}"
         );
-        assert_eq!(not_found_body(), "{\"ok\":false,\"code\":\"ERR_NOT_FOUND\"}");
+        assert_eq!(
+            not_found_body(),
+            "{\"ok\":false,\"code\":\"ERR_NOT_FOUND\"}"
+        );
     }
 }

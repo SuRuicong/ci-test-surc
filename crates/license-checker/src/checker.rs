@@ -3,7 +3,8 @@
 //! 0=valid / 2=expired / 3=tampered / 4=unlicensed / 5=clock_rollback / 6=fingerprint_mismatch。
 
 use crate::ledger::{
-    append_ledger_entry, derive_ledger_key, load_ledger_tip, verify_ledger_chain, LedgerTip, GENESIS_HASH,
+    append_ledger_entry, derive_ledger_key, load_ledger_tip, verify_ledger_chain, LedgerTip,
+    GENESIS_HASH,
 };
 use crate::pg_ledger::{pg_tip_matches_file, PgLedgerSink};
 use chrono::{DateTime, Utc};
@@ -109,8 +110,12 @@ fn evaluate(ctx: &mut CheckerContext) -> AgentosResult<Evaluation> {
     }
 
     // 2. 验签 + schema（时效单独按水印语义判定 → skip_temporal_checks）
-    let raw_text = std::fs::read_to_string(&lic_path)
-        .map_err(|e| AgentosError::new("ERR_STATE_READ_FAILED", &format!("failed to read {}: {e}", lic_path.display())))?;
+    let raw_text = std::fs::read_to_string(&lic_path).map_err(|e| {
+        AgentosError::new(
+            "ERR_STATE_READ_FAILED",
+            &format!("failed to read {}: {e}", lic_path.display()),
+        )
+    })?;
     let raw: Value = match serde_json::from_str(&raw_text) {
         Ok(v) => v,
         Err(e) => {
@@ -125,7 +130,10 @@ fn evaluate(ctx: &mut CheckerContext) -> AgentosResult<Evaluation> {
         Err(err) => {
             return Ok(Evaluation::Fail(fail(
                 EXIT_TAMPERED,
-                format!("active license failed verification: {}: {}", err.code, err.message),
+                format!(
+                    "active license failed verification: {}: {}",
+                    err.code, err.message
+                ),
             )))
         }
     };
@@ -139,7 +147,10 @@ fn evaluate(ctx: &mut CheckerContext) -> AgentosResult<Evaluation> {
     if !match_result.ok {
         return Ok(Evaluation::Fail(fail(
             EXIT_FINGERPRINT_MISMATCH,
-            format!("fingerprint mismatch: {}", match_result.mismatches.join(", ")),
+            format!(
+                "fingerprint mismatch: {}",
+                match_result.mismatches.join(", ")
+            ),
         )));
     }
 
@@ -184,7 +195,10 @@ fn evaluate(ctx: &mut CheckerContext) -> AgentosResult<Evaluation> {
             if now_ms < wm - CLOCK_ROLLBACK_TOLERANCE_MS {
                 return Ok(Evaluation::Fail(fail(
                     EXIT_CLOCK_ROLLBACK,
-                    format!("system clock rolled back below watermark {}", t.wall_clock_max),
+                    format!(
+                        "system clock rolled back below watermark {}",
+                        t.wall_clock_max
+                    ),
                 )));
             }
         }
@@ -192,7 +206,9 @@ fn evaluate(ctx: &mut CheckerContext) -> AgentosResult<Evaluation> {
 
     // 6. 时效：基准取 max(当前系统时间, wall_clock_max)
     let effective_now_ms = match &tip {
-        Some(t) if t.wall_clock_max > now_iso => parse_iso_millis(&t.wall_clock_max).unwrap_or(now_ms),
+        Some(t) if t.wall_clock_max > now_iso => {
+            parse_iso_millis(&t.wall_clock_max).unwrap_or(now_ms)
+        }
         _ => now_ms,
     };
     if let Some(expires) = parse_iso_millis(&payload.expires_at) {
@@ -211,7 +227,11 @@ fn evaluate(ctx: &mut CheckerContext) -> AgentosResult<Evaluation> {
     })))
 }
 
-fn build_payload(payload: &LicensePayload, tip: Option<&LedgerTip>, state_dir: &Path) -> Option<Value> {
+fn build_payload(
+    payload: &LicensePayload,
+    tip: Option<&LedgerTip>,
+    state_dir: &Path,
+) -> Option<Value> {
     let cumulative = tip.map(|t| t.cumulative_seconds).unwrap_or(0.0);
     let base = load_runtime_base(state_dir, &payload.license_id)?;
     let used = (cumulative - base.base_cumulative_seconds).max(0.0);
@@ -239,7 +259,8 @@ fn quota_check(result_payload: Option<Value>, max_runtime_seconds: i64) -> Check
     match result_payload {
         None => fail(
             EXIT_TAMPERED,
-            "runtime base missing or does not match active license (activation channel bypassed?)".to_string(),
+            "runtime base missing or does not match active license (activation channel bypassed?)"
+                .to_string(),
         ),
         Some(p) => {
             let remaining = p
@@ -277,7 +298,10 @@ pub fn run_status(ctx: &mut CheckerContext) -> AgentosResult<CheckerResult> {
 }
 
 /// license-checker heartbeat：status 全量校验通过后追加账本条目（单调时钟计量 + PG 双写）。
-pub fn run_heartbeat(ctx: &mut CheckerContext, tick_monotonic_ms: f64) -> AgentosResult<CheckerResult> {
+pub fn run_heartbeat(
+    ctx: &mut CheckerContext,
+    tick_monotonic_ms: f64,
+) -> AgentosResult<CheckerResult> {
     let evaluated = match evaluate(ctx)? {
         Evaluation::Ok(e) => e,
         Evaluation::Fail(r) => return Ok(r),
@@ -285,8 +309,14 @@ pub fn run_heartbeat(ctx: &mut CheckerContext, tick_monotonic_ms: f64) -> Agento
     let now_ms = ctx.now_ms.unwrap_or_else(license_core::time::now_millis);
     let now_iso = iso_from_millis(now_ms);
     let watermark = evaluated.tip.as_ref().map(|t| t.wall_clock_max.as_str());
-    let (entry, tip) = append_ledger_entry(&ctx.state_dir, &evaluated.ledger_key, tick_monotonic_ms, &now_iso, watermark)
-        .map_err(|e| AgentosError::new("ERR_LEDGER", &e))?;
+    let (entry, tip) = append_ledger_entry(
+        &ctx.state_dir,
+        &evaluated.ledger_key,
+        tick_monotonic_ms,
+        &now_iso,
+        watermark,
+    )
+    .map_err(|e| AgentosError::new("ERR_LEDGER", &e))?;
     if let Some(sink) = ctx.pg_sink.as_deref_mut() {
         sink.append(&entry)?;
     }

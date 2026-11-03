@@ -225,7 +225,10 @@ mod tests {
     #[test]
     fn canonical_sorts_keys_and_compacts() {
         let v = json!({"b": 1, "a": {"y": [true, null], "x": "s"}});
-        assert_eq!(canonical_json(&v), r#"{"a":{"x":"s","y":[true,null]},"b":1}"#);
+        assert_eq!(
+            canonical_json(&v),
+            r#"{"a":{"x":"s","y":[true,null]},"b":1}"#
+        );
     }
 
     #[test]

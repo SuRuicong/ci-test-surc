@@ -5,7 +5,9 @@ use chrono::{DateTime, Utc};
 
 /// 'YYYY-MM-DDTHH:mm:ss(.f)?(Z|±hh:mm)' → Unix 毫秒；非法返回 None（对应 Date.parse → NaN）。
 pub fn parse_iso_millis(s: &str) -> Option<i64> {
-    DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp_millis())
 }
 
 pub fn now_millis() -> i64 {
