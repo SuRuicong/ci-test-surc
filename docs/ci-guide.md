@@ -145,6 +145,8 @@ steps:
 
 **Node.js / Python 这类"纯 JS/纯 Python + 少量原生模块"的项目**：纯代码本身跨架构，主要是把对应架构的原生依赖（如 `sharp`、`better-sqlite3`）装对。做法是按架构分 job 各自 `npm ci`，或交叉下载目标平台的预编译二进制。
 
+> 本仓库的实际实施：采用"路线 1 + 原生构建镜像"的组合（不推送镜像仓库），见 `.github/workflows/ci.yml` 的 `docker` job 与 `docker/Dockerfile`，使用说明见 README 1.4 节。
+
 ### 路线 3：QEMU 模拟（emulation）+ Docker Buildx 多架构镜像
 
 如果最终交付物是 Docker 镜像，标准做法是用 QEMU（CPU 指令模拟）+ Buildx（Docker 的多平台构建器）一次出多架构镜像：

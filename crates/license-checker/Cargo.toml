@@ -12,7 +12,9 @@ path = "src/main.rs"
 
 [dependencies]
 license-core = { path = "../license-core" }
-serde_json = { version = "1", features = ["preserve_order"] }
+# float_roundtrip：浮点解析必须正确舍入；否则 122.39500000000001 这类最短
+# 往返表示会差 1 ulp，heartbeat 写入与 status 重算 entry_hash 会基于不同 f64。
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 hkdf = "0.12"

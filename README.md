@@ -38,8 +38,34 @@ cargo build --release
 
 ```powershell
 Set-Location tools/license-rt
-cargo test      # core 36 + daemon 5 + checker 8 = 49 个测试
+cargo test      # core 46 + daemon 6 + checker 9 = 61 个测试
 ```
+
+### 1.4 多架构 Docker 镜像（CI 产物，不推送镜像仓库）
+
+CI（`.github/workflows/ci.yml` 的 `docker` job）在原生 runner 上构建 `linux/amd64` 与 `linux/arm64` 两种镜像——复用 `build` job 产出的对应架构二进制，`docker/Dockerfile` 只做 COPY，不在镜像内编译。镜像**不推送**任何镜像仓库：构建后在 runner 本地冒烟测试，再导出 `agentos-license-image-<版本>-linux-<架构>.tar.gz`，发版时随 GitHub Release 分发。
+
+本机导入与运行：
+
+```bash
+docker load -i agentos-license-image-<版本>-linux-<架构>.tar.gz
+
+# daemon（注意：必须挂载宿主机 machine-id，见下）
+docker run --rm -p 8471:8471 \
+  -v /etc/machine-id:/etc/machine-id:ro \
+  -v <状态目录>:/state -v <公钥目录>:/keys \
+  agentos-license:<版本>-<架构> serve --state-dir /state --public-key-file /keys/xxx.public.json
+
+# checker（用 --entrypoint 覆盖默认入口）
+docker run --rm --entrypoint agentos-license-checker \
+  -v /etc/machine-id:/etc/machine-id:ro \
+  -v <状态目录>:/state -v <公钥目录>:/keys \
+  agentos-license:<版本>-<架构> status --state-dir /state --public-key-file /keys/xxx.public.json
+```
+
+**指纹绑定要求（当前约定）**：必选锚点 c1 = `sha256(/etc/machine-id)`（采集点见 `crates/license-core/src/fingerprint.rs` 的 `probe_linux()`），读的是容器内自己的文件系统。不挂载时容器内 machine-id 与宿主机不同（或不存在导致 c1 unavailable），激活会报 `ERR_FINGERPRINT_MISMATCH`。因此**运行时必须只读挂载宿主机的 `/etc/machine-id`**，保证同一台机器上容器内外指纹一致、都能认证。其余分量（dmi-* 等）为可选，容器内通常显示 `unavailable`，不影响只绑定 c1 的 license。
+
+> 局限：该约定只保证"同一台机器"。容器迁移到另一台宿主机后指纹必然变化，需要重新采集指纹并重新签发——这与二进制直接部署的换机行为一致。
 
 ---
 
@@ -86,6 +112,8 @@ agentos-license-daemon serve `
 ```
 
 `anchor=MISSING(c1)` 表示必选锚点分量（代号 c1）不可用——**此时仍可启动，但签发时指纹不可用，需先解决机器锚点问题**（stderr 会有 WARN 行）。分量名以代号（c1..c5）对外展示，真实采集来源不出现在任何交付物（ADR-20261102）。
+
+支持平台的锚点来源：Linux 读 `/etc/machine-id`；Windows 读注册表 `MachineGuid`；macOS（darwin，arm64 与 x86_64 同一套逻辑）用 `ioreg` 的 `IOPlatformUUID` 作必选锚点、`IOPlatformSerialNumber` 作可选分量（c2/c4 恒 unavailable，不生成替代值）。所有平台统一规则：内容为空（含纯空白）按 unavailable 处理，绝不对空串做哈希；ARM64 Linux 无 `model name` 时 c4 用 `CPU implementer/part/variant/revision` 回退组合（ADR-20261103）。
 
 ### 2.2 采集指纹（交付给供应商签发用）
 
@@ -287,7 +315,7 @@ Write-Output "exit=$LASTEXITCODE"
 ### 3.7 验收 checklist
 
 - [ ] `cargo build --release` 通过，两个 exe 生成
-- [ ] `cargo test` 49 个测试全绿
+- [ ] `cargo test` 61 个测试全绿
 - [ ] daemon 启动行 `anchor=ok`
 - [ ] `/fingerprint.json` 与 TS 版输出一致
 - [ ] 激活 200，`active.lic` 与 TS 产物字节一致

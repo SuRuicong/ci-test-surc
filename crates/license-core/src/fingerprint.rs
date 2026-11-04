@@ -15,12 +15,23 @@ pub fn sha256_hex(data: &str) -> String {
 }
 
 fn norm(value: &str) -> String {
-    value.trim().to_lowercase()
+    // trim_matches('\u{feff}') 对齐 JS String.trim()（JS 会把 BOM 当空白去除，Rust 不会），
+    // 保证双实现对同一输入产出同一字符串（现实中 systemd/注册表/IOKit 均不会写出 BOM）。
+    value.trim_matches('\u{feff}').trim().to_lowercase()
+}
+
+/// trim 后为空按缺失计：不对空串做哈希（sha256('') 是公开常量，会把多台机器的锚点撞成同一个值）。
+fn nonempty_norm(s: &str) -> Option<String> {
+    if s.trim().is_empty() {
+        None
+    } else {
+        Some(norm(s))
+    }
 }
 
 /// 探测源抽象：真实环境由 SystemProbeSource 提供，测试注入假数据。
 pub trait ProbeSource {
-    /// "win32" | "linux"（Node process.platform 语义）
+    /// "win32" | "linux" | "darwin"（Node process.platform 语义）
     fn platform(&self) -> &'static str;
     /// 读文件，不存在/不可读返回 None。
     fn read_file(&self, path: &str) -> Option<String>;
@@ -49,11 +60,21 @@ impl CollectedFingerprint {
 }
 
 /// /proc/cpuinfo → `${model}|${逻辑核数}`（规范化小写）。
+/// ARM 回退：`model name` 缺失时（典型于 ARM64）用 `CPU implementer/part/variant/revision`
+/// 组成 `arm {impl}/{part}/{variant}/{revision}`（缺失段填 '-'）；implementer 与 part 均缺 → None。
+/// x86 取值路径逐字节不变。
 pub fn parse_linux_cpu_info(raw: &str) -> Option<String> {
     let mut model: Option<String> = None;
+    let mut implementer: Option<String> = None;
+    let mut part: Option<String> = None;
+    let mut variant: Option<String> = None;
+    let mut revision: Option<String> = None;
     let mut cores = 0u32;
     for line in raw.split('\n') {
-        if Regex::new(r"^processor\s*:\s*\d+").unwrap().is_match(line) {
+        if Regex::new(r"^processor\s*:\s*[0-9]+")
+            .unwrap()
+            .is_match(line)
+        {
             cores += 1;
         }
         if model.is_none() {
@@ -64,11 +85,54 @@ pub fn parse_linux_cpu_info(raw: &str) -> Option<String> {
                 model = Some(caps.get(1).unwrap().as_str().trim().to_string());
             }
         }
+        if implementer.is_none() {
+            if let Some(caps) = Regex::new(r"^CPU implementer\s*:\s*(.+)$")
+                .unwrap()
+                .captures(line)
+            {
+                implementer = Some(caps.get(1).unwrap().as_str().trim().to_string());
+            }
+        }
+        if part.is_none() {
+            if let Some(caps) = Regex::new(r"^CPU part\s*:\s*(.+)$").unwrap().captures(line) {
+                part = Some(caps.get(1).unwrap().as_str().trim().to_string());
+            }
+        }
+        if variant.is_none() {
+            if let Some(caps) = Regex::new(r"^CPU variant\s*:\s*(.+)$")
+                .unwrap()
+                .captures(line)
+            {
+                variant = Some(caps.get(1).unwrap().as_str().trim().to_string());
+            }
+        }
+        if revision.is_none() {
+            if let Some(caps) = Regex::new(r"^CPU revision\s*:\s*(.+)$")
+                .unwrap()
+                .captures(line)
+            {
+                revision = Some(caps.get(1).unwrap().as_str().trim().to_string());
+            }
+        }
     }
-    let model = model?;
     if cores == 0 {
         return None;
     }
+    let model = match model {
+        Some(m) => m,
+        None => {
+            if implementer.is_none() && part.is_none() {
+                return None;
+            }
+            format!(
+                "arm {}/{}/{}/{}",
+                implementer.as_deref().unwrap_or("-"),
+                part.as_deref().unwrap_or("-"),
+                variant.as_deref().unwrap_or("-"),
+                revision.as_deref().unwrap_or("-")
+            )
+        }
+    };
     Some(format!("{model}|{cores}").to_lowercase())
 }
 
@@ -95,9 +159,10 @@ fn probe_linux(source: &dyn ProbeSource) -> Vec<(String, String)> {
     vec![
         (
             REQUIRED_ANCHOR_NAME.to_string(),
-            hashed_component(source.read_file("/etc/machine-id").as_deref(), |s| {
-                Some(norm(s))
-            }),
+            hashed_component(
+                source.read_file("/etc/machine-id").as_deref(),
+                nonempty_norm,
+            ),
         ),
         (
             "dmi-product-uuid".to_string(),
@@ -105,7 +170,7 @@ fn probe_linux(source: &dyn ProbeSource) -> Vec<(String, String)> {
                 source
                     .read_file("/sys/class/dmi/id/product_uuid")
                     .as_deref(),
-                |s| Some(norm(s)),
+                nonempty_norm,
             ),
         ),
         (
@@ -114,7 +179,7 @@ fn probe_linux(source: &dyn ProbeSource) -> Vec<(String, String)> {
                 source
                     .read_file("/sys/class/dmi/id/product_serial")
                     .as_deref(),
-                |s| Some(norm(s)),
+                nonempty_norm,
             ),
         ),
         (
@@ -177,7 +242,7 @@ fn probe_windows(source: &dyn ProbeSource) -> Vec<(String, String)> {
     vec![
         (
             REQUIRED_ANCHOR_NAME.to_string(),
-            hashed_component(guid.as_deref(), |s| Some(norm(s))),
+            hashed_component(guid.as_deref(), nonempty_norm),
         ),
         (
             "dmi-product-uuid".to_string(),
@@ -194,20 +259,59 @@ fn probe_windows(source: &dyn ProbeSource) -> Vec<(String, String)> {
     ]
 }
 
+/// macOS 使用平台 UUID 作为必选锚点，序列号作为可选分量。
+/// 不复制同一硬件值到多个分量，也不在采集失败时生成替代标识。
+fn probe_macos(source: &dyn ProbeSource) -> Vec<(String, String)> {
+    let output = source.exec("/usr/sbin/ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"]);
+    let property = |name: &str| -> Option<String> {
+        let pattern = format!(r#"(?m)^\s*"{}"\s*=\s*"([^"]*)"\s*$"#, regex::escape(name));
+        let re = Regex::new(&pattern).ok()?;
+        let value = re.captures(output.as_deref()?)?.get(1)?.as_str().trim();
+        if value.is_empty() {
+            None
+        } else {
+            Some(norm(value))
+        }
+    };
+    let uuid = property("IOPlatformUUID").filter(|value| {
+        static UUID_RE: OnceLock<Regex> = OnceLock::new();
+        UUID_RE
+            .get_or_init(|| {
+                Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+                    .unwrap()
+            })
+            .is_match(value)
+            && value != "00000000-0000-0000-0000-000000000000"
+    });
+    let serial = property("IOPlatformSerialNumber");
+    vec![
+        (
+            REQUIRED_ANCHOR_NAME.to_string(),
+            hashed_component(uuid.as_deref(), |s| Some(s.to_string())),
+        ),
+        ("dmi-product-uuid".to_string(), "unavailable".to_string()),
+        (
+            "dmi-product-serial".to_string(),
+            hashed_component(serial.as_deref(), |s| Some(s.to_string())),
+        ),
+        ("cpu".to_string(), "unavailable".to_string()),
+    ]
+}
+
 /// 采集机器指纹：固定序拼接 canonical 文本后取 SHA-256。
 pub fn collect_fingerprint(
     source: &dyn ProbeSource,
     instance_id: Option<&str>,
 ) -> CollectedFingerprint {
-    let mut components = if source.platform() == "win32" {
-        probe_windows(source)
-    } else {
-        probe_linux(source)
+    let mut components = match source.platform() {
+        "win32" => probe_windows(source),
+        "darwin" => probe_macos(source),
+        _ => probe_linux(source),
     };
     components.push((
         "agentos-instance-id".to_string(),
-        match instance_id {
-            Some(id) => format!("sha256:{}", sha256_hex(&norm(id))),
+        match instance_id.and_then(nonempty_norm) {
+            Some(id) => format!("sha256:{}", sha256_hex(&id)),
             None => "unavailable".to_string(),
         },
     ));
@@ -271,7 +375,7 @@ pub fn format_fingerprint_groups(fingerprint: &str) -> String {
     out
 }
 
-/// 真实宿主机探测源：Linux 直读系统文件；Windows reg query + powershell CIM。
+/// 真实宿主机探测源：Linux 直读系统文件；Windows reg/CIM；macOS ioreg。
 /// 所有探测都是只读；任何失败返回 None，由采集层标记 unavailable。
 pub struct SystemProbeSource;
 
@@ -285,6 +389,8 @@ impl ProbeSource for SystemProbeSource {
     fn platform(&self) -> &'static str {
         if cfg!(windows) {
             "win32"
+        } else if cfg!(target_os = "macos") {
+            "darwin"
         } else {
             "linux"
         }
@@ -364,6 +470,9 @@ mod tests {
         }
         fn exec(&self, file: &str, args: &[&str]) -> Option<String> {
             let joined = args.join(" ");
+            if file == "/usr/sbin/ioreg" && args == ["-rd1", "-c", "IOPlatformExpertDevice"] {
+                return self.wmi.get("ioreg").cloned();
+            }
             if file == "reg" && joined.contains("MachineGuid") {
                 return self.machine_guid.as_ref().map(|g| {
                     format!("\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\r\n    MachineGuid    REG_SZ    {g}\r\n\r\n")
@@ -377,6 +486,57 @@ mod tests {
                 }
             }
             None
+        }
+    }
+
+    #[test]
+    fn macos_uses_platform_uuid_as_anchor_and_serial_as_optional_component() {
+        let source = FakeSource {
+            platform: "darwin",
+            files: HashMap::new(),
+            machine_guid: None,
+            wmi: HashMap::from([("ioreg".into(), "    \"IOPlatformUUID\" = \"A1B2C3D4-E5F6-7890-ABCD-EF0123456789\"\n    \"IOPlatformSerialNumber\" = \"Serial-123\"\n".into())]),
+        };
+        let a = collect_fingerprint(&source, Some("inst-abc"));
+        let b = collect_fingerprint(&source, Some("inst-abc"));
+        assert!(a.anchor_available);
+        assert_eq!(
+            a.component("machine-id"),
+            Some(format!("sha256:{}", sha256_hex(WIN_GUID_NORM)).as_str())
+        );
+        assert_eq!(
+            a.component("dmi-product-serial"),
+            Some(format!("sha256:{}", sha256_hex("serial-123")).as_str())
+        );
+        assert_eq!(a.component("dmi-product-uuid"), Some("unavailable"));
+        assert_eq!(a.component("cpu"), Some("unavailable"));
+        assert_eq!(a.fingerprint, b.fingerprint);
+        let text = crate::jsonfmt::compact_json(&build_fingerprint_file(&a));
+        assert!(!text.contains("A1B2C3D4"));
+        assert!(!text.contains("Serial-123"));
+    }
+
+    #[test]
+    fn macos_missing_or_invalid_uuid_cannot_be_an_anchor() {
+        for uuid in [
+            None,
+            Some(""),
+            Some("garbage"),
+            Some("00000000-0000-0000-0000-000000000000"),
+        ] {
+            let mut wmi = HashMap::new();
+            if let Some(uuid) = uuid {
+                wmi.insert("ioreg".into(), format!("\"IOPlatformUUID\" = \"{uuid}\"\n"));
+            }
+            let source = FakeSource {
+                platform: "darwin",
+                files: HashMap::new(),
+                machine_guid: None,
+                wmi,
+            };
+            let fp = collect_fingerprint(&source, None);
+            assert!(!fp.anchor_available, "invalid UUID accepted: {uuid:?}");
+            assert_eq!(fp.component("machine-id"), Some("unavailable"));
         }
     }
 
@@ -446,6 +606,123 @@ mod tests {
         let fp = collect_fingerprint(&source, None);
         assert_eq!(fp.component("machine-id"), Some("unavailable"));
         assert!(!fp.anchor_available);
+    }
+
+    #[test]
+    fn linux_blank_machine_id_is_unavailable_not_empty_hash() {
+        // 空文件/纯空白内容不得哈希成 sha256('') 常量锚点（绑定穿透场景）。
+        for content in ["", "\n", "   \r\n"] {
+            let source = FakeSource {
+                platform: "linux",
+                files: HashMap::from([("/etc/machine-id".to_string(), content.to_string())]),
+                machine_guid: None,
+                wmi: HashMap::new(),
+            };
+            let fp = collect_fingerprint(&source, None);
+            assert_eq!(
+                fp.component("machine-id"),
+                Some("unavailable"),
+                "blank anchor accepted: {content:?}"
+            );
+            assert!(!fp.anchor_available);
+        }
+    }
+
+    #[test]
+    fn linux_blank_dmi_components_and_instance_id_are_unavailable() {
+        let source = FakeSource {
+            platform: "linux",
+            files: HashMap::from([
+                (
+                    "/etc/machine-id".to_string(),
+                    LINUX_MACHINE_ID_RAW.to_string(),
+                ),
+                (
+                    "/sys/class/dmi/id/product_uuid".to_string(),
+                    "  \n".to_string(),
+                ),
+                (
+                    "/sys/class/dmi/id/product_serial".to_string(),
+                    "\n".to_string(),
+                ),
+            ]),
+            machine_guid: None,
+            wmi: HashMap::new(),
+        };
+        let fp = collect_fingerprint(&source, Some("   "));
+        assert_eq!(fp.component("dmi-product-uuid"), Some("unavailable"));
+        assert_eq!(fp.component("dmi-product-serial"), Some("unavailable"));
+        assert_eq!(fp.component("agentos-instance-id"), Some("unavailable"));
+        assert!(fp.anchor_available);
+    }
+
+    #[test]
+    fn linux_arm64_cpuinfo_without_model_name_uses_arm_fallback() {
+        // ARM64 /proc/cpuinfo 通常无 model name；用 implementer/part/variant/revision 组成稳定型号。
+        // 与 TS parseLinuxCpuInfo 相同输入必须得到相同规范化串。
+        const ARM64_CPUINFO: &str = "processor\t: 0\nBogoMIPS\t: 38.40\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32\nCPU implementer\t: 0x41\nCPU architecture: 8\nCPU variant\t: 0x0\nCPU part\t: 0xd03\nCPU revision\t: 4\nprocessor\t: 1\nCPU implementer\t: 0x41\nCPU variant\t: 0x0\nCPU part\t: 0xd03\nCPU revision\t: 4\n";
+        let source = FakeSource {
+            platform: "linux",
+            files: HashMap::from([
+                (
+                    "/etc/machine-id".to_string(),
+                    LINUX_MACHINE_ID_RAW.to_string(),
+                ),
+                ("/proc/cpuinfo".to_string(), ARM64_CPUINFO.to_string()),
+            ]),
+            machine_guid: None,
+            wmi: HashMap::new(),
+        };
+        let fp = collect_fingerprint(&source, None);
+        assert_eq!(
+            parse_linux_cpu_info(ARM64_CPUINFO).as_deref(),
+            Some("arm 0x41/0xd03/0x0/4|2")
+        );
+        assert_eq!(
+            fp.component("cpu"),
+            Some(format!("sha256:{}", sha256_hex("arm 0x41/0xd03/0x0/4|2")).as_str())
+        );
+    }
+
+    #[test]
+    fn linux_cpuinfo_without_model_and_arm_fields_is_unavailable() {
+        const BARE_CPUINFO: &str = "processor\t: 0\nprocessor\t: 1\n";
+        assert_eq!(parse_linux_cpu_info(BARE_CPUINFO), None);
+    }
+
+    #[test]
+    fn linux_cpuinfo_model_name_takes_priority_over_arm_fields() {
+        // model name 与 ARM 字段同时存在时以 model name 为准（x86 取值路径冻结）。
+        const MIXED: &str = "processor\t: 0\nmodel name\t: Some x86 CPU\nCPU implementer\t: 0x41\nCPU part\t: 0xd03\n";
+        assert_eq!(
+            parse_linux_cpu_info(MIXED).as_deref(),
+            Some("some x86 cpu|1")
+        );
+    }
+
+    #[test]
+    fn linux_arm_fallback_blank_field_value_stays_empty_segment() {
+        // 字段存在但值为空白：捕获后 trim 为空串段（区别于缺失段的 '-'）；与 TS 同输入同输出，钉死防漂移。
+        const BLANK_FIELD: &str = "processor\t: 0\nCPU implementer\t: 0x41\nCPU part\t: \n";
+        assert_eq!(
+            parse_linux_cpu_info(BLANK_FIELD).as_deref(),
+            Some("arm 0x41//-/-|1")
+        );
+    }
+
+    #[test]
+    fn blank_instance_id_string_is_unavailable() {
+        let source = FakeSource {
+            platform: "linux",
+            files: HashMap::from([(
+                "/etc/machine-id".to_string(),
+                LINUX_MACHINE_ID_RAW.to_string(),
+            )]),
+            machine_guid: None,
+            wmi: HashMap::new(),
+        };
+        let fp = collect_fingerprint(&source, Some(""));
+        assert_eq!(fp.component("agentos-instance-id"), Some("unavailable"));
     }
 
     #[test]

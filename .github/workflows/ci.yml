@@ -20,6 +20,10 @@ jobs:
           - { runs-on: ubuntu-24.04-arm, os-name: linux,   arch: aarch64 }
           # Windows x86_64
           - { runs-on: windows-latest,   os-name: windows, arch: x86_64 }
+          # macOS x86_64（Intel；macos-13 是最后的 Intel runner）
+          - { runs-on: macos-13,         os-name: darwin,  arch: x86_64 }
+          # macOS ARM64（Apple Silicon；macos-latest 为 arm64 runner）
+          - { runs-on: macos-latest,     os-name: darwin,  arch: aarch64 }
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v7
@@ -43,11 +47,11 @@ jobs:
       - name: cargo build (release)
         run: cargo build --workspace --locked --release
 
-      - name: 打包产物（Linux tar.gz + sha256）
-        if: matrix.os-name == 'linux'
+      - name: 打包产物（Linux/macOS tar.gz + sha256）
+        if: matrix.os-name == 'linux' || matrix.os-name == 'darwin'
         run: |
           mkdir -p dist
-          pkg="agentos-license-${{ github.ref_name }}-linux-${{ matrix.arch }}"
+          pkg="agentos-license-${{ github.ref_name }}-${{ matrix.os-name }}-${{ matrix.arch }}"
           tar -czf "dist/${pkg}.tar.gz" \
             -C target/release agentos-license-daemon agentos-license-checker
           cd dist && sha256sum "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
@@ -69,9 +73,68 @@ jobs:
           name: dist-${{ matrix.os-name }}-${{ matrix.arch }}
           path: dist/
 
+  # ===== 多架构 Docker 镜像（方案 A：原生构建，不推送镜像仓库）=====
+  # 复用 build job 在各架构原生 runner 上产出的二进制，Docker 阶段只 COPY 不编译。
+  # 镜像不推送：构建后载入 runner 本地做冒烟测试，再导出 tar.gz 作为构件，
+  # 发版时随 GitHub Release 分发，使用者 docker load 导入即可。
+  docker:
+    name: 构建并导出单架构镜像 (${{ matrix.platform }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runs-on: ubuntu-24.04,     arch: x86_64,  platform: linux/amd64 }
+          - { runs-on: ubuntu-24.04-arm, arch: aarch64, platform: linux/arm64 }
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 下载本架构的 release 产物
+        uses: actions/download-artifact@v8
+        with:
+          name: dist-linux-${{ matrix.arch }}
+          path: dist/
+
+      - name: 解压二进制到 Docker 构建上下文
+        run: |
+          mkdir -p docker/bin
+          tar -xzf "dist/agentos-license-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz" -C docker/bin
+          ls -l docker/bin
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建镜像并载入本地
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: agentos-license:${{ github.ref_name }}-${{ matrix.arch }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 冒烟测试（容器内跑 --help，验证镜像可启动）
+        run: |
+          docker run --rm "agentos-license:${{ github.ref_name }}-${{ matrix.arch }}" --help
+          docker run --rm --entrypoint agentos-license-checker \
+            "agentos-license:${{ github.ref_name }}-${{ matrix.arch }}" --help
+
+      - name: 导出镜像为 tar.gz
+        run: |
+          docker save "agentos-license:${{ github.ref_name }}-${{ matrix.arch }}" \
+            | gzip > "dist/agentos-license-image-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz"
+          ls -lh dist/
+
+      - name: 上传镜像产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-linux-${{ matrix.arch }}
+          path: dist/agentos-license-image-*.tar.gz
+
   release:
     name: 发布 GitHub Release
-    needs: build
+    needs: [build, docker]
     # 仅 tag 推送时发布；workflow_dispatch 手动触发（ref 是分支）时跳过
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
@@ -82,6 +145,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: dist-*
+          merge-multiple: true
+          path: release/
+
+      - name: 汇总 Docker 镜像产物
+        uses: actions/download-artifact@v8
+        with:
+          pattern: image-*
           merge-multiple: true
           path: release/
 

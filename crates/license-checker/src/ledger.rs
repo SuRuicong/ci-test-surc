@@ -472,4 +472,27 @@ mod tests {
         assert!(line.starts_with("{\"seq\":1,\"recorded_at\":\"2026-11-15T00:00:00.000Z\",\"wall_clock_max\":\"2026-11-15T00:00:00.000Z\",\"tick_monotonic_ms\":60000,\"cumulative_seconds\":60,\"prev_hash\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"entry_hash\":\"sha256:"));
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn non_tidy_float_cumulative_still_verifies() {
+        // 现场回归：supervisor 传实测间隔（62390ms、60005ms），第二次心跳后 cumulative
+        // 会落在 122.39500000000001 这类非整洁浮点；写入后 status/verify 不得自判篡改。
+        let dir = temp_dir("float-cumulative");
+        let key = derive_ledger_key("sig", "fp");
+        let (_e1, t1) =
+            append_ledger_entry(&dir, &key, 62390.0, "2026-11-15T00:00:00.000Z", None).unwrap();
+        assert_eq!(t1.cumulative_seconds, 62.39);
+        let (_e2, t2) = append_ledger_entry(
+            &dir,
+            &key,
+            60005.0,
+            "2026-11-15T00:01:02.390Z",
+            Some(&t1.wall_clock_max),
+        )
+        .unwrap();
+        assert_eq!(t2.cumulative_seconds, 122.39500000000001);
+        let result = verify_ledger_chain(&dir, &key).unwrap();
+        assert!(result.ok, "ledger should verify, got: {:?}", result.reason);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
